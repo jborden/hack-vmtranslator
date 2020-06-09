@@ -213,8 +213,35 @@
      "@THAT")
    "M=D"])
 
+(defn push-static
+  [i basename]
+  [(str "// push static " i)
+   ;; get the value of @<basename>.<i>
+   (str "@" basename "." i)
+   "D=M"
+   ;; set *sp to this value
+   "@SP"
+   "A=M"
+   "M=D"
+   sp++
+   (str "// end push static " i)])
+
+(defn pop-static
+  [i basename]
+  [(str "// pop static " i)
+   sp--
+   ;; get the value of sp
+   "@SP"
+   "A=M"
+   "D=M"
+   ;; set this value to @<basename>.<i>
+   (str "@" basename "." i)
+   "M=D"
+   (str "// end pop static " i)])
+
+
 (defn memory-command
-  [v]
+  [v env]
   (let [[_ [_ command] [_ segment] [_ i]] v]
     (cond
       (= "push" command)
@@ -225,14 +252,18 @@
             (= "temp" segment)
             (push-temp-i i)
             (= "pointer" segment)
-            (push-pointer i))
+            (push-pointer i)
+            (= "static" segment)
+            (push-static i (:basename env)))
       (= "pop" command)
       (cond (= "temp" segment)
             (pop-temp-i i)
             (contains? #{"local" "argument" "this" "that"} segment)
             (pop-memory-fn segment i)
             (= "pointer" segment)
-            (pop-pointer i)))))
+            (pop-pointer i)
+            (= "static" segment)
+            (pop-static i (:basename env))))))
 
 (defn double-operand-command->asm
   [command]
@@ -331,10 +362,10 @@
       (contains? #{"eq" "gt" "lt"} command) (comparison-command->asm command))))
 
 (defn tokens->asm
-  [v]
+  [v env]
   (->> v
        (mapv #(condp = (first %)
-                :MEMORY_COMMAND (memory-command %)
+                :MEMORY_COMMAND (memory-command % env)
                 :ALU_COMMAND (alu-command %)
                 nil))
        ;; shouldn't need this once complete, keep for now
@@ -347,9 +378,11 @@
   [filename]
   (let [io-file (io/file filename)
         filepath (.getPath io-file)
+        basename (-> (.getName io-file) (string/split #"\.") first)
         output-filename (string/replace filepath #".vm" ".asm")
         input (slurp filepath)
-        tokens (gen-tokens input)]
+        tokens (gen-tokens input)
+        env {:basename basename}]
     (spit output-filename
           (->> (flatten-vector
                 ["@begin_program"
@@ -357,5 +390,5 @@
                  (base-comparison-fn-header)
                  push-constant-conserved-fn
                  "(begin_program)"
-                 (tokens->asm tokens)])
+                 (tokens->asm tokens env)])
                (string/join "\n")))))
