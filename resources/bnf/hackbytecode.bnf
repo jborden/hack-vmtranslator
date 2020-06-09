@@ -1,9 +1,9 @@
 LINES = (ALU_COMMAND | MEMORY_COMMAND | <COMMENT_LINE> | <EOL>)+
-ALU_COMMAND = "add" | "sub" | "neg" | "eq" | "gt" | "lt" | "and" | "or" | "not"
-MEMORY_COMMAND = COMMAND <" "> SEGMENT <" "> VALUE
+ALU_COMMAND = ("add" | "sub" | "neg" | "eq" | "gt" | "lt" | "and" | "or" | "not") (<#"\s*"> <COMMENT_LINE> <EOL>)?
+MEMORY_COMMAND = COMMAND <" "> SEGMENT <" "> i (<#"\s*"> <COMMENT_LINE> <EOL>)?
 COMMAND = "push" | "pop"
 SEGMENT = "local" | "argument" | "this" | "that" | "constant" | "static" | "pointer" | "temp"
-VALUE = #"\d+"
+i = #"\d+"
 <EOL>= #"\r?\n"
 <COMMENT_LINE> = #"//.*"
 
