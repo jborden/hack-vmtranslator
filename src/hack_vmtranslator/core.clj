@@ -187,6 +187,32 @@
    "M=D"
    (str "// end pop temp " i)])
 
+(defn push-pointer [i]
+  [(str "// push pointer " i)
+   ;; get the value of this or that
+   (if (= i "0")
+     "@THIS"
+     "@THAT")
+   "D=M"
+   "@SP"
+   "A=M"
+   "M=D"
+   sp++
+   (str "// end push pointer" i)])
+
+(defn pop-pointer [i]
+  [(str "// pop pointer " i)
+   sp--
+   ;; get the value of sp
+   "@SP"
+   "A=M"
+   "D=M"
+   ;; set this/that equal to the value
+   (if (= i "0")
+     "@THIS"
+     "@THAT")
+   "M=D"])
+
 (defn memory-command
   [v]
   (let [[_ [_ command] [_ segment] [_ i]] v]
@@ -197,12 +223,16 @@
             (contains? #{"local" "argument" "this" "that"} segment)
             (push-memory-fn segment i)
             (= "temp" segment)
-            (push-temp-i i))
+            (push-temp-i i)
+            (= "pointer" segment)
+            (push-pointer i))
       (= "pop" command)
       (cond (= "temp" segment)
             (pop-temp-i i)
             (contains? #{"local" "argument" "this" "that"} segment)
-            (pop-memory-fn segment i)))))
+            (pop-memory-fn segment i)
+            (= "pointer" segment)
+            (pop-pointer i)))))
 
 (defn double-operand-command->asm
   [command]
