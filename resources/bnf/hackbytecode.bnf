@@ -1,9 +1,12 @@
-LINES = (ALU_COMMAND | MEMORY_COMMAND | <COMMENT_LINE> | <EOL>)+
-ALU_COMMAND = ("add" | "sub" | "neg" | "eq" | "gt" | "lt" | "and" | "or" | "not") (<#"\s*"> <COMMENT_LINE> <EOL>)?
-MEMORY_COMMAND = COMMAND <" "> SEGMENT <" "> i (<#"\s*"> <COMMENT_LINE> <EOL>)?
+LINES = (ALU_COMMAND | MEMORY_COMMAND | <COMMENT_LINE> | BRANCHING_COMMAND | <EOL>)+
+ALU_COMMAND = ("add" | "sub" | "neg" | "eq" | "gt" | "lt" | "and" | "or" | "not") <#"\s">+? (<COMMENT> | <EOL>)
+MEMORY_COMMAND = COMMAND <" "> SEGMENT <" "> i <#"\s">+? (<COMMENT> | <EOL>)
 COMMAND = "push" | "pop"
 SEGMENT = "local" | "argument" | "this" | "that" | "constant" | "static" | "pointer" | "temp"
 i = #"\d+"
+BRANCHING_COMMAND = ("label" | "goto" | "if-goto" ) <" "> LABEL <#"\s">+? (<COMMENT> | <EOL>)
+LABEL = #"(\w|\.|\$)*"
 <EOL>= #"\r?\n"
 <COMMENT_LINE> = #"//.*"
+COMMENT = (<COMMENT_LINE> <EOL>)
 

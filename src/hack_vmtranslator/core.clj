@@ -89,21 +89,15 @@
      "this" "@THIS"
      "that" "@THAT")
    "D=M"
-   "@R15"
-   "M=D"
-   ;; set D to i
    (str "@" i)
-   "D=A"
-   ;; set A = segment + i (addr)
-   "@R15"
-   "D=D+M"
+   "D=D+A"
    "A=D"])
 
 (defn push-memory-fn
   [segment i]
-  (str "// push " segment " " i)
-  ;; addr = LCL + i
-  [(addr-eq-segment-plus-i segment i)
+  [(str "// push " segment " " i)
+   ;; addr = LCL + i
+   (addr-eq-segment-plus-i segment i)
    ;; *sp=*addr
    ;; get the value at addr
    "D=M"
@@ -361,12 +355,32 @@
       (contains? #{"neg" "not"} command) (single-operand-command->asm command)
       (contains? #{"eq" "gt" "lt"} command) (comparison-command->asm command))))
 
+(defn branching-command
+  [[_ command [_ label]]]
+  (condp = command
+    "label" [(str "// label " label)
+             (str "(" label ")")]
+    "goto" [(str "// goto " label)
+            (str "@" label)
+            "0;JMP"
+            (str "// end goto " label)]
+    "if-goto" [(str "// if-goto " label)
+               sp--
+               ;; get the value after the pop
+               "A=M"
+               "D=M"
+               ;; if D > 0 (e.g. not 0, jmp)
+               (str "@" label)
+               "D;JGT"
+               (str "// end if-goto " label)]))
+
 (defn tokens->asm
   [v env]
   (->> v
        (mapv #(condp = (first %)
                 :MEMORY_COMMAND (memory-command % env)
                 :ALU_COMMAND (alu-command %)
+                :BRANCHING_COMMAND (branching-command %)
                 nil))
        ;; shouldn't need this once complete, keep for now
        (filterv (comp not nil?))
