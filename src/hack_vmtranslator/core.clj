@@ -3,6 +3,9 @@
             [clojure.string :as string]
             [instaparse.core :refer [defparser]]))
 
+(defonce current-function (atom nil))
+(defonce call-count (atom nil))
+
 (defparser hack-bytecode-parser
   (slurp "resources/bnf/hackbytecode.bnf"))
 
@@ -15,7 +18,7 @@
   [v]
   (->> v flatten (into [])))
 
-(def sp++
+(def sp++ ;; this could be shortened to @SP | M=M+1
   ["@SP"
    "D=M"
    "D=D+1"
@@ -355,24 +358,180 @@
       (contains? #{"neg" "not"} command) (single-operand-command->asm command)
       (contains? #{"eq" "gt" "lt"} command) (comparison-command->asm command))))
 
+(defn label-string
+  [s]
+  (if (seq @current-function)
+    (str @current-function "$" s)
+    s))
+
+(defn goto-label
+  [s]
+  (let [label s ;;(label-string s)
+        ]
+    [(str "// goto " label)
+     (str "@" label)
+     "0;JMP"
+     (str "// end goto " label)]))
+
 (defn branching-command
   [[_ command [_ label]]]
   (condp = command
     "label" [(str "// label " label)
              (str "(" label ")")]
-    "goto" [(str "// goto " label)
-            (str "@" label)
-            "0;JMP"
-            (str "// end goto " label)]
-    "if-goto" [(str "// if-goto " label)
-               sp--
-               ;; get the value after the pop
-               "A=M"
-               "D=M"
-               ;; if D > 0 (e.g. not 0, jmp)
-               (str "@" label)
-               "D;JGT"
-               (str "// end if-goto " label)]))
+    "goto" (goto-label label)
+    "if-goto" (let [label label;;(label-string label)
+                    ]
+                [(str "// if-goto " label)
+                 sp--
+                 ;; get the value after the pop
+                 "A=M"
+                 "D=M"
+                 ;; if D > 0 (e.g. not 0, jmp)
+                 (str "@" label)
+                 "D;JGT"
+                 (str "// end if-goto " label)])))
+
+(defn push-0-n-times
+  [n]
+  (mapv (fn [_] (push-constant-fn "0")) (range 0 n)))
+
+(defn push-pointer-val
+  [pointer]
+  [(str "// push " pointer)
+   pointer
+   "D=M"
+   "@SP"
+   "A=M"
+   "M=D"
+   "@SP"
+   "M=M+1"
+   (str "// end push " pointer)])
+
+(defn function-command
+  [[_ command [_ function-name] [_ n]] env]
+  (condp = command
+    "call"
+    (let [ret-addr-label (gensym "retAddrLabel")]
+      [(str "// call " function-name " " n)
+       ;; push retAddrLabel
+       (str "@" ret-addr-label)
+       "D=A"
+       "@SP"
+       "A=M"
+       "M=D"
+       "@SP"
+       "M=M+1"
+       ;; push LCL
+       (push-pointer-val "@LCL")
+       ;; push ARG
+       (push-pointer-val "@ARG")
+       ;; push THIS
+       (push-pointer-val "@THIS")
+       ;; push THAT
+       (push-pointer-val "@THAT")
+       "// ARG = SP - 5 - nArgs"
+       "@SP"
+       "D=M"
+       ;; -5
+       (mapv (constantly "D=D-1") (range 0 5))
+       ;; - nArgs
+       (mapv (constantly "D=D-1") (range (read-string n)))
+       "@ARG"
+       "M=D"
+       ;; LCL = SP
+       "@SP"
+       "D=M"
+       "@LCL"
+       "M=D"
+       ;; goto functionName
+       (goto-label function-name)
+       (str "(" ret-addr-label ")")
+       (str "// end call " function-name " " n)])
+    "function"
+    (let [_ (reset! current-function (str function-name "." (:basename env))) ; set the global state function-name
+          ;;function-name (str (:basename env) "." function-name)
+          ]
+      [(str "// function " function-name" " n)
+       (str "(" function-name ")")
+       (push-0-n-times (read-string n))
+       ;;(str "// end function " function-name " " n)
+       ])
+    "return"
+    (do
+      (reset! current-function nil) ;; not in a function anymore
+      [(str "// return")
+       "// endframe = LCL = @R13"
+       "@LCL"
+       "D=M"
+       "@R13"
+       "M=D"
+       "// retAddr = *(endFrame - 5) = @R14"
+       "@5"
+       "D=A"
+       "@R13"
+       "D=M-D"
+       "A=D"
+       "D=M"
+       "@R14"
+       "M=D"
+       "// *ARG = pop()"
+       sp--
+       "@SP"
+       "A=M"
+       "D=M"
+       "@ARG"
+       "A=M"
+       "M=D"
+       "// SP = ARG + 1"
+       "@ARG"
+       "D=M"
+       "D=D+1"
+       "@SP"
+       "M=D"
+       "// THAT = *(endFrame - 1)"
+       "@R13"
+       "D=M"
+       "D=D-1"
+       "A=D"
+       "D=M"
+       "@THAT"
+       "M=D"
+       "// THIS = *(endFrame - 2)"
+       "@R13"
+       "D=M"
+       "D=D-1"
+       "D=D-1"
+       "A=D"
+       "D=M"
+       "@THIS"
+       "M=D"
+       "// ARG = *(endFrame - 3)"
+       "@R13"
+       "D=M"
+       "D=D-1"
+       "D=D-1"
+       "D=D-1"
+       "A=D"
+       "D=M"
+       "@ARG"
+       "M=D"
+       "// LCL = *(endFrame - 4)"
+       "@R13"
+       "D=M"
+       "D=D-1"
+       "D=D-1"
+       "D=D-1"
+       "D=D-1"
+       "A=D"
+       "D=M"
+       "@LCL"
+       "M=D"
+       "// goto retAddr = *(endFrame - 5)"
+       "@R14"
+       "D=M"
+       "A=D"
+       "0;JMP"
+       (str "// end return")])))
 
 (defn tokens->asm
   [v env]
@@ -381,6 +540,7 @@
                 :MEMORY_COMMAND (memory-command % env)
                 :ALU_COMMAND (alu-command %)
                 :BRANCHING_COMMAND (branching-command %)
+                :FUNCTION_COMMAND (function-command % env)
                 nil))
        ;; shouldn't need this once complete, keep for now
        (filterv (comp not nil?))
@@ -397,6 +557,7 @@
         input (slurp filepath)
         tokens (gen-tokens input)
         env {:basename basename}]
+    ;;tokens
     (spit output-filename
           (->> (flatten-vector
                 ["@begin_program"
