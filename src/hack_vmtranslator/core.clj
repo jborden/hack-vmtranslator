@@ -4,6 +4,7 @@
             [instaparse.core :refer [defparser]]))
 
 (defonce current-function (atom nil))
+(defonce current-filename (atom nil))
 (defonce call-count (atom nil))
 
 (defparser hack-bytecode-parser
@@ -18,14 +19,14 @@
   [v]
   (->> v flatten (into [])))
 
-(def sp++ ;; this could be shortened to @SP | M=M+1
-  ["@SP"
-   "D=M"
-   "D=D+1"
-   "M=D"])
+(defn sp++
+  [& [comment]]
+  [(str "@SP" comment)
+   "M=M+1"])
 
-(def sp--
-  ["@SP"
+(defn sp--
+  [& [comment]]
+  [(str "@SP" comment)
    "D=M"
    "D=D-1"
    "M=D"])
@@ -72,15 +73,13 @@
 (defn push-constant-fn
   [i]
   (let [pos-m (position-map)]
-    [(str "// push constant " i)
-     ;; store where we are at in R13
+    [;; store where we are at in R13
      (:save-pos pos-m)
      (str "@" i)
      "D=A"
      "@push_constant_conserved_fn"
      "0;JMP"
-     (:pos-label pos-m)
-     (str "// end push constant " i)]))
+     (:pos-label pos-m)]))
 
 (defn addr-eq-segment-plus-i
   "Set D (addr) to segment + i"
@@ -98,8 +97,7 @@
 
 (defn push-memory-fn
   [segment i]
-  [(str "// push " segment " " i)
-   ;; addr = LCL + i
+  [;; addr = LCL + i
    (addr-eq-segment-plus-i segment i)
    ;; *sp=*addr
    ;; get the value at addr
@@ -109,12 +107,10 @@
    "A=M"
    "M=D"
    ;; SP++
-   sp++
-   (str "// end push " segment " " i)])
+   (sp++ (str " // end push " segment " " i))])
 
 (defn pop-memory-fn [segment i]
-  [(str "// pop " segment " " i)
-   sp--
+  [(sp-- (str " // pop " segment " " i))
    ;; R14 = *sp
    "@SP"
    "A=M"
@@ -133,14 +129,12 @@
    "@R15"
    "A=M"
    ;; *addr = *sp
-   "M=D"
-   (str "// end pop " segment " " i)])
+   (str "M=D" " // end pop " segment " " i)])
 
 (defn push-temp-i
   [i]
-  [(str "// push temp " i)
-   ;; addr = 5+i
-   (str "@" i)
+  [;; addr = 5+i
+   (str "@" i " // push temp " i)
    "D=A"
    "@5"
    "D=D+A"
@@ -152,13 +146,11 @@
    "A=M"
    "M=D"
    ;; SP++
-   sp++
-   (str "// end push temp " i)])
+   (sp++ (str " // end push temp " i))])
 
 (defn pop-temp-i
   [i]
-  [(str "// pop temp " i)
-   sp--
+  [(sp-- (str " // pop temp " i))
    ;; R14 = *sp
    "@SP"
    "A=M"
@@ -181,25 +173,21 @@
    "@R15"
    "A=M"
    ;; *addr = *sp
-   "M=D"
-   (str "// end pop temp " i)])
+   (str "M=D" " // end pop temp " i)])
 
 (defn push-pointer [i]
-  [(str "// push pointer " i)
-   ;; get the value of this or that
+  [;; get the value of this or that
    (if (= i "0")
-     "@THIS"
-     "@THAT")
+     (str "@THIS // push pointer " i)
+     (str "@THAT // push pointer " i))
    "D=M"
    "@SP"
    "A=M"
    "M=D"
-   sp++
-   (str "// end push pointer" i)])
+   (sp++ (str " // end push pointer " i))])
 
 (defn pop-pointer [i]
-  [(str "// pop pointer " i)
-   sp--
+  [(sp-- (str " // pop pointer" i))
    ;; get the value of sp
    "@SP"
    "A=M"
@@ -208,33 +196,29 @@
    (if (= i "0")
      "@THIS"
      "@THAT")
-   "M=D"])
+   (str "M=D // end pop pointer " i)])
 
 (defn push-static
   [i basename]
-  [(str "// push static " i)
-   ;; get the value of @<basename>.<i>
-   (str "@" basename "." i)
+  [;; get the value of @<basename>.<i>
+   (str "@" basename "." i " // push static " i)
    "D=M"
    ;; set *sp to this value
    "@SP"
    "A=M"
    "M=D"
-   sp++
-   (str "// end push static " i)])
+   (sp++ (str " // end push static " i))])
 
 (defn pop-static
   [i basename]
-  [(str "// pop static " i)
-   sp--
+  [(sp-- (str " // pop static " i))
    ;; get the value of sp
    "@SP"
    "A=M"
    "D=M"
    ;; set this value to @<basename>.<i>
    (str "@" basename "." i)
-   "M=D"
-   (str "// end pop static " i)])
+   (str "M=D" " // end pop static " i)])
 
 
 (defn memory-command
@@ -264,8 +248,7 @@
 
 (defn double-operand-command->asm
   [command]
-  [(str "// " command)
-   (set-D-to-SP-2-value)
+  [(set-D-to-SP-2-value)
    "@R14 // store SP - 1 in R14"
    "M=D"
    (set-D-to-SP-1-value)
@@ -282,17 +265,14 @@
    "A=M"
    "M=D"
    "@SP // increment SP to top of stack"
-   "M=M+1"
-   (str "// end " command)])
+   "M=M+1"])
 
 (defn single-operand-command->asm
   [command]
-  [(str "// " command)
-   (set-D-to-SP-1-value)
+  [(set-D-to-SP-1-value)
    (condp = command
-     "not" "M=!D"
-     "neg" "M=-D")
-   (str "// end " command )])
+     "not" "M=!D // not"
+     "neg" "M=-D // neg")])
 
 ;; http://nand2tetris-questions-and-answers-forum.32033.n3.nabble.com/translating-eq-to-asm-td4028370.html
 ;; 1. Generalize to create functions for eq/gt/lt
@@ -328,15 +308,12 @@
 
 (defn base-comparison-fn-header
   []
-  ["// comparison fn header"
-   (mapv base-comparison-fn  ["eq" "gt" "lt"])
-   "// end comparison fn header"])
+  [(mapv base-comparison-fn  ["eq" "gt" "lt"])])
 
 (defn comparison-command->asm
   [command]
   (let [end-comp-label (gensym "end.comp.fn")]
-    [(str "// " command)
-     (str "@" end-comp-label " // save end-comp-label pointer in R13")
+    [(str "@" end-comp-label " // " command)
      "D=A"
      "@R13"
      "M=D"
@@ -346,9 +323,7 @@
        "gt" "@gt_fn // go to the gt_fn"
        "lt" "@lt_fn // go to the lt_fn")
      "0;JMP"
-     (str "(" end-comp-label ") // ")
-     ;; not sure if we should put a throwaway command here like 'D=0'
-     (str "// end " command)]))
+     (str "(" end-comp-label ") // end " command)]))
 
 (defn alu-command
   [v]
@@ -368,28 +343,23 @@
   [s]
   (let [label s ;;(label-string s)
         ]
-    [(str "// goto " label)
-     (str "@" label)
-     "0;JMP"
-     (str "// end goto " label)]))
+    [(str "@" label " // goto " label)
+     (str "0;JMP" " // end goto " label)]))
 
 (defn branching-command
   [[_ command [_ label]]]
   (condp = command
-    "label" [(str "// label " label)
-             (str "(" label ")")]
+    "label" [(str "(" label ")")]
     "goto" (goto-label label)
     "if-goto" (let [label label;;(label-string label)
                     ]
-                [(str "// if-goto " label)
-                 sp--
+                [(sp-- (str " // if-goto " label))
                  ;; get the value after the pop
                  "A=M"
                  "D=M"
                  ;; if D > 0 (e.g. not 0, jmp)
                  (str "@" label)
-                 "D;JGT"
-                 (str "// end if-goto " label)])))
+                 (str "D;JNE" " // end if-goto " label)])))
 
 (defn push-0-n-times
   [n]
@@ -397,24 +367,21 @@
 
 (defn push-pointer-val
   [pointer]
-  [(str "// push " pointer)
-   pointer
+  [(str pointer " // push " pointer)
    "D=M"
    "@SP"
    "A=M"
    "M=D"
    "@SP"
-   "M=M+1"
-   (str "// end push " pointer)])
+   "M=M+1"])
 
 (defn function-command
-  [[_ command [_ function-name] [_ n]] env]
+  [[_ command [_ function-name] [_ n]]]
   (condp = command
     "call"
     (let [ret-addr-label (gensym "retAddrLabel")]
-      [(str "// call " function-name " " n)
-       ;; push retAddrLabel
-       (str "@" ret-addr-label)
+      [;; push retAddrLabel
+       (str "@" ret-addr-label " // call " function-name " " n)
        "D=A"
        "@SP"
        "A=M"
@@ -429,8 +396,7 @@
        (push-pointer-val "@THIS")
        ;; push THAT
        (push-pointer-val "@THAT")
-       "// ARG = SP - 5 - nArgs"
-       "@SP"
+       "@SP // ARG = SP - 5 - nArgs"
        "D=M"
        ;; -5
        (mapv (constantly "D=D-1") (range 0 5))
@@ -445,59 +411,48 @@
        "M=D"
        ;; goto functionName
        (goto-label function-name)
-       (str "(" ret-addr-label ")")
-       (str "// end call " function-name " " n)])
+       (str "(" ret-addr-label ")" " // end call " function-name " " n)])
     "function"
-    (let [_ (reset! current-function (str function-name "." (:basename env))) ; set the global state function-name
-          ;;function-name (str (:basename env) "." function-name)
+    (let [_ (reset! current-function function-name) ; set the global state function-name
           ]
-      [(str "// function " function-name" " n)
-       (str "(" function-name ")")
-       (push-0-n-times (read-string n))
-       ;;(str "// end function " function-name " " n)
-       ])
+      [(str "(" function-name ")")
+       (push-0-n-times (read-string n))])
     "return"
     (do
       (reset! current-function nil) ;; not in a function anymore
-      [(str "// return")
-       "// endframe = LCL = @R13"
-       "@LCL"
+      [;;endframe = LCL = @R13
+       "@LCL // return"
        "D=M"
        "@R13"
        "M=D"
-       "// retAddr = *(endFrame - 5) = @R14"
-       "@5"
+       "@5 // retAddr = *(endFrame - 5) = @R14"
        "D=A"
        "@R13"
        "D=M-D"
        "A=D"
        "D=M"
        "@R14"
-       "M=D"
-       "// *ARG = pop()"
-       sp--
+       "M=D // *ARG = pop() -- below"
+       (sp--)
        "@SP"
        "A=M"
        "D=M"
        "@ARG"
        "A=M"
        "M=D"
-       "// SP = ARG + 1"
-       "@ARG"
+       "@ARG // SP = ARG + 1"
        "D=M"
        "D=D+1"
        "@SP"
        "M=D"
-       "// THAT = *(endFrame - 1)"
-       "@R13"
+       "@R13 // THAT = *(endFrame - 1)"
        "D=M"
        "D=D-1"
        "A=D"
        "D=M"
        "@THAT"
        "M=D"
-       "// THIS = *(endFrame - 2)"
-       "@R13"
+       "@R13 // THIS = *(endFrame - 2)"
        "D=M"
        "D=D-1"
        "D=D-1"
@@ -505,8 +460,7 @@
        "D=M"
        "@THIS"
        "M=D"
-       "// ARG = *(endFrame - 3)"
-       "@R13"
+       "@R13 // ARG = *(endFrame - 3)"
        "D=M"
        "D=D-1"
        "D=D-1"
@@ -515,8 +469,7 @@
        "D=M"
        "@ARG"
        "M=D"
-       "// LCL = *(endFrame - 4)"
-       "@R13"
+       "@R13 // LCL = *(endFrame - 4)"
        "D=M"
        "D=D-1"
        "D=D-1"
@@ -526,12 +479,10 @@
        "D=M"
        "@LCL"
        "M=D"
-       "// goto retAddr = *(endFrame - 5)"
-       "@R14"
+       "@R14 // goto retAddr = *(endFrame - 5)"
        "D=M"
        "A=D"
-       "0;JMP"
-       (str "// end return")])))
+       "0;JMP // end return"])))
 
 (defn tokens->asm
   [v env]
@@ -540,30 +491,58 @@
                 :MEMORY_COMMAND (memory-command % env)
                 :ALU_COMMAND (alu-command %)
                 :BRANCHING_COMMAND (branching-command %)
-                :FUNCTION_COMMAND (function-command % env)
+                :FUNCTION_COMMAND (function-command %)
                 nil))
        ;; shouldn't need this once complete, keep for now
        (filterv (comp not nil?))
        ;;(string/join "\n")
        ))
 
+(def bootstrap-code
+  ["@256 // begin bootstrap-code"
+   "D=A"
+   "@SP"
+   "M=D"
+   (function-command [nil "call" [nil "Sys.init"] [nil "0"]])])
+
 (defn translate-file
   "Given a filename with hack bytecode, output a .asm output file representing it"
-  [filename]
-  (let [io-file (io/file filename)
+  [f]
+  (let [io-file (io/file f)
+        dir? (.isDirectory io-file)
         filepath (.getPath io-file)
-        basename (-> (.getName io-file) (string/split #"\.") first)
-        output-filename (string/replace filepath #".vm" ".asm")
-        input (slurp filepath)
-        tokens (gen-tokens input)
-        env {:basename basename}]
-    ;;tokens
+        output-filename (if dir?
+                          (str filepath "/" (-> (.getName io-file)
+                                                (string/split #"\.")
+                                                first) ".asm")
+                          (string/replace filepath #".vm" ".asm"))
+        files (-> io-file
+                  file-seq)
+        compiled-code  (->> files
+                            (filter #(re-matches #".*vm" (.getPath %)))
+                            (map (fn [f]
+                                   [;;(str "// begin file: " (.getName f))
+                                    (-> (.getPath f)
+                                        slurp
+                                        gen-tokens
+                                        (tokens->asm {:basename
+                                                      (-> (.getName io-file)
+                                                          (string/split #"\.")
+                                                          first)}))
+                                    ;;(str "// end file: " (.getName f))
+                                    ])))
+        code (->> (flatten-vector
+                   ["@begin_program"
+                    "0;JMP"
+                    (base-comparison-fn-header)
+                    push-constant-conserved-fn
+                    "(begin_program)"
+                    bootstrap-code
+                    compiled-code]))
+        no-labels-code (remove (partial re-matches #"\(.*\).*") code)]
+    ;;code
     (spit output-filename
-          (->> (flatten-vector
-                ["@begin_program"
-                 "0;JMP"
-                 (base-comparison-fn-header)
-                 push-constant-conserved-fn
-                 "(begin_program)"
-                 (tokens->asm tokens env)])
-               (string/join "\n")))))
+          (string/join "\n" code))
+    ;;debug-code
+    (spit (str output-filename ".asm")
+          (string/join "\n" no-labels-code))))
