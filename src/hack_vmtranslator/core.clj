@@ -526,7 +526,7 @@
                                         slurp
                                         gen-tokens
                                         (tokens->asm {:basename
-                                                      (-> (.getName io-file)
+                                                      (-> (.getName f)
                                                           (string/split #"\.")
                                                           first)}))
                                     ;;(str "// end file: " (.getName f))
